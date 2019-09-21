@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<launch>
+  <node pkg="nodelet" type="nodelet" name="obj_ind_manager" args="manager" output="screen">
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="disp_box_nodelet" args="load object_indicator/disp_box obj_ind_manager" >
+    <remap from="raw_image" to="/motion_image"/>
+    <remap from="bounding_boxes" to="/darknet_ros/bounding_boxes"/>
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="motion_detect_nodelet" args="load object_indicator/motion_detection obj_ind_manager" >
+    <remap from="raw_image" to="/camera_detection/image_rect"/>
+  </node>
+
+  <node pkg="nodelet" type="nodelet" name="qr_code_detect_nodelet" args="load object_indicator/qr_code_detection obj_ind_manager" >
+    <remap from="raw_image" to="/camera_detection/image_rect"/>
+  </node>
+
+  <node name="image_box_view" pkg="image_view" type="image_view" >
+    <remap from="image" to="disp_image"/>
+  </node>
+
+  <node name="image_motion_view" pkg="image_view" type="image_view" >
+    <remap from="image" to="motion_image"/>
+  </node>
+
+  <node name="image_qr_codes_view" pkg="image_view" type="image_view" >
+    <remap from="image" to="qr_codes_image"/>
+  </node>
+
+</launch>
+

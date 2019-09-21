@@ -1,0 +1,22 @@
+<library path="lib/libobject_indicator">
+  <class name="object_indicator/disp_box"
+     type="object_indicator::disp_box"
+     base_class_type="nodelet::Nodelet">
+    <description>
+    </description>
+  </class>
+
+  <class name="object_indicator/motion_detection"
+     type="object_indicator::motion_detection"
+     base_class_type="nodelet::Nodelet">
+    <description>
+    </description>
+  </class>
+
+  <class name="object_indicator/qr_code_detection"
+     type="object_indicator::qr_code_detection"
+     base_class_type="nodelet::Nodelet">
+    <description>
+    </description>
+  </class>
+</library>
