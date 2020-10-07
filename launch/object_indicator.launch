@@ -16,6 +16,10 @@
     <remap from="raw_image" to="/camera_detection/image_rect"/>
   </node>
 
+  <node pkg="nodelet" type="nodelet" name="rust_detect_nodelet" args="load object_indicator/rust_detection obj_ind_manager" >
+    <remap from="raw_image" to="/camera_detection/image_rect"/>
+  </node>
+
   <node name="image_box_view" pkg="image_view" type="image_view" >
     <remap from="image" to="disp_image"/>
   </node>
@@ -28,5 +32,9 @@
     <remap from="image" to="qr_codes_image"/>
   </node>
 
+  <node name="image_box_view" pkg="image_view" type="image_view" >
+    <remap from="image" to="rust_image"/>
+  </node>
+  
 </launch>
 

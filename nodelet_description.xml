@@ -19,4 +19,12 @@
     <description>
     </description>
   </class>
+
+  <class name="object_indicator/rust_detection"
+     type="object_indicator::rust_detection"
+     base_class_type="nodelet::Nodelet">
+    <description>
+    </description>
+  </class>
+
 </library>

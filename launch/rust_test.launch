@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+  <node pkg="nodelet" type="nodelet" name="obj_ind_manager" args="manager" output="screen">
+  </node>
+
+
+  <node pkg="nodelet" type="nodelet" name="rust_detect_nodelet" args="load object_indicator/rust_detection obj_ind_manager" >
+    <remap from="raw_image" to="/image_data"/>
+  </node>
+
+  <node name="image_box_view" pkg="image_view" type="image_view" >
+    <remap from="image" to="rust_image"/>
+  </node>
+
+</launch>
+

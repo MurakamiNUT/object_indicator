@@ -259,6 +259,7 @@ namespace object_indicator{
             tags.push_back(tag);
         }
 
+        std_msgs::String pub_str;
         for (auto& tag : tags){
             //cv::polylines(color, tag.polygon, true, cv::Scalar(255, 255, 255), 5, 4);
             //cv::polylines(color, tag.polygon, true, cv::Scalar(255, 255, 0), 3, 4);
@@ -272,13 +273,157 @@ namespace object_indicator{
             cv::circle(color, cv::Point(centre_x, centre_y), 20, cv::Scalar(255, 255, 0), 3, 4);
             putText(color, tag.message, tag.polygon[0], cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255, 255, 255), 3, 4);
             putText(color, tag.message, tag.polygon[0], cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255, 255, 0), 1, 4);
-            pub_codes.publish(tag.message);
+            pub_str.data = tag.message;
+            pub_codes.publish(pub_str);
         }
         sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", color).toImageMsg();
         pub_image.publish(pub_msg);
+    }
+
+    class rust_detection : public nodelet::Nodelet{
+        public:
+            //起動処理
+            virtual void onInit();
+            //画像購読・配信
+            void image_callback(const sensor_msgs::ImageConstPtr& msg);
+        private:
+            ros::NodeHandle nh_;        //ノード
+            ros::NodeHandle pnh_;       //
+            ros::Subscriber sub_image;  //画像購読者
+            ros::Publisher pub_;        //処理画像配信者
+            
+    };
+
+    void rust_detection::onInit(){
+        nh_ = getNodeHandle();          //ノードハンドル取得
+        pnh_ = getPrivateNodeHandle();
+        //購読者立ち上げ
+        sub_image = nh_.subscribe("raw_image", 10, &rust_detection::image_callback, this);
+
+        //配信者立ち上げ
+        pub_ = nh_.advertise<sensor_msgs::Image>("rust_image", 10);
+        
+    }
+
+
+    void rust_detection::image_callback(const sensor_msgs::ImageConstPtr& msg){
+        cv_bridge::CvImagePtr cv_ptr;
+
+        //ROS←→OpenCV間の変換
+        try{
+            cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+        }catch (cv_bridge::Exception& ex){
+            NODELET_ERROR("Error");
+            exit(-1);
+        }
+        
+        cv::Mat mat, color_mat;
+        cv::Mat blur_mat, edges_mat, gray_mat, center_mat;
+        std::vector<cv::Vec4i> lines;
+        cv::Mat element_e = cv::Mat::ones(25,25,CV_8UC1);
+        cv::Mat element_d = cv::Mat::ones(9,9,CV_8UC1);
+
+        //cv::Mat mask_mat, motion_mat, pub_mat;
+
+        color_mat = cv_ptr->image.clone();
+        //gray scale
+        cv::cvtColor(cv_ptr->image, mat, CV_BGR2GRAY);
+        //denoising
+        cv::medianBlur(mat, blur_mat, 15);
+        //edge extraction and line detection(plate contour)
+        cv::Canny(blur_mat, edges_mat, 30, 60);
+        cv::HoughLinesP(edges_mat, lines, 1.0, CV_PI/360, 40, 80, 80);  //(image, lines, rho, theta, threshold, minLineLength = (0.0), maxLineGap = (0.0))
+
+        //contour masking
+        cv::Mat bg = cv::Mat::ones(mat.rows, mat.cols, mat.type());
+        for(size_t i=0; i<lines.size(); i++){
+            cv::line(bg, cv::Point(lines[i][0], lines[i][1]), cv::Point(lines[i][2], lines[i][3]), 0, 3);
+        }
+        cv::erode(bg, bg, element_e);
+        cv::dilate(bg, bg, element_d);
+        bg = bg.mul(mat);
+        bg.convertTo(gray_mat, CV_32F);
+
+        //clustering(min -> 0(rust), max -> 255(plate))
+        cv::Mat_<int> labels_mat((gray_mat.reshape(1,gray_mat.rows*gray_mat.cols)).size(), CV_32SC1);
+        cv::kmeans(gray_mat.reshape(1,gray_mat.rows*gray_mat.cols), 3, labels_mat, cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 100, 0.1), 10, cv::KMEANS_RANDOM_CENTERS, center_mat);
+        center_mat.convertTo(center_mat, CV_8U);
+        double minVal, maxVal;
+        cv::Point minLoc, maxLoc;
+        cv::minMaxLoc(center_mat, &minVal, &maxVal, &minLoc, &maxLoc);
+        center_mat.at<unsigned char>(minLoc.x, minLoc.y)=0;
+        center_mat.at<unsigned char>(maxLoc.x, maxLoc.y)=255;
+
+        cv::Mat res(mat.rows, mat.cols, mat.type());
+        cv::Mat white = cv::Mat::zeros(mat.rows, mat.cols, mat.type());
+        cv::Mat black = cv::Mat::zeros(mat.rows, mat.cols, mat.type());
+
+        cv::MatIterator_<unsigned char> itf = center_mat.begin<unsigned char>();
+        cv::MatIterator_<unsigned char> itd = res.begin<unsigned char>(), itd_end = res.end<unsigned char>();
+        cv::MatIterator_<unsigned char> itw = white.begin<unsigned char>(), itw_end = white.end<unsigned char>();
+        cv::MatIterator_<unsigned char> itb = black.begin<unsigned char>(), itb_end = black.end<unsigned char>();
+        
+        for(int i=0; itd != itd_end; ++itd, ++itw, ++itb, ++i) {
+            unsigned char color = itf[labels_mat(1,i)];
+            (*itd) = color;
+            if(color == (255))(*itw) = 255;
+            if(color == (0))(*itb) = 255;
+        }
+        
+        //region segmentation
+        std::vector< std::vector<cv::Point> > contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(white, contours, hierarchy, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
+        
+        //plate and rust detection
+        for(int i=0;i<contours.size(); i++){
+            if(contours[i].size() > 0){
+                //exclude too small region
+                if(cv::contourArea(contours[i]) < 60000)continue;
+                cv::Rect rect=cv::boundingRect(contours[i]);
+                int x = rect.x;
+                int y = rect.y;
+                int w = rect.width;
+                int h = rect.height;
+                //exclude too large region
+                if(w*h > white.rows*white.cols*0.8)continue;
+
+                cv::Mat white_roi = white(rect);
+                int white_sum = cv::countNonZero(white_roi);
+                //exclude low density region
+                if(w*h*0.8 > white_sum)continue;
+
+                cv::rectangle(color_mat, rect, cv::Scalar(0, 0, 255), 10);
+
+                //count rust pixels in plate rectangle
+                rect.x = x+(uint)(w*0.05);
+                rect.y = y+(uint)(h*0.05);
+                rect.width = (uint)(w*0.9);
+                rect.height = (uint)(h*0.9);
+                cv::Mat black_roi = black(rect);
+                int black_sum = cv::countNonZero(black_roi);
+                //calculate plate to rust ratio
+                double ratio = black_sum/(cv::contourArea(contours[i])+black_sum);
+
+                //write information on the image
+                std::string str_ratio = "Ratio:";
+                str_ratio += std::to_string(ratio);
+                cv::putText(color_mat, str_ratio, cv::Point(x,y), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255,255,255),10);
+                cv::putText(color_mat, str_ratio, cv::Point(x,y), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255,0,0),4);
+            }
+        } 
+
+        sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", color_mat).toImageMsg();
+       /*
+        cv::cvtColor(black, black, CV_GRAY2BGR);
+        sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", black).toImageMsg();
+*/
+        pub_.publish(pub_msg);
+
     }
 
 } // namespace plugin_lecture
 PLUGINLIB_EXPORT_CLASS(object_indicator::disp_box, nodelet::Nodelet);
 PLUGINLIB_EXPORT_CLASS(object_indicator::motion_detection, nodelet::Nodelet);
 PLUGINLIB_EXPORT_CLASS(object_indicator::qr_code_detection, nodelet::Nodelet);
+PLUGINLIB_EXPORT_CLASS(object_indicator::rust_detection, nodelet::Nodelet);
