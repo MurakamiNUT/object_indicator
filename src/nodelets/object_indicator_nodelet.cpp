@@ -330,12 +330,18 @@ namespace object_indicator{
         cv::cvtColor(cv_ptr->image, mat, CV_BGR2GRAY);
         //denoising
         cv::medianBlur(mat, blur_mat, 15);
+        
         //edge extraction and line detection(plate contour)
+        //cv::Mat bg = cv::Mat::ones(mat.rows, mat.cols, mat.type());
+        cv::adaptiveThreshold(blur_mat, blur_mat, 1, CV_ADAPTIVE_THRESH_GAUSSIAN_C, CV_THRESH_BINARY, 35, 3);
+        blur_mat = blur_mat.mul(mat);
+        blur_mat.convertTo(gray_mat, CV_32F);
+        /*
         cv::Canny(blur_mat, edges_mat, 30, 60);
         cv::HoughLinesP(edges_mat, lines, 1.0, CV_PI/360, 40, 80, 80);  //(image, lines, rho, theta, threshold, minLineLength = (0.0), maxLineGap = (0.0))
 
         //contour masking
-        cv::Mat bg = cv::Mat::ones(mat.rows, mat.cols, mat.type());
+        //cv::Mat bg = cv::Mat::ones(mat.rows, mat.cols, mat.type());
         for(size_t i=0; i<lines.size(); i++){
             cv::line(bg, cv::Point(lines[i][0], lines[i][1]), cv::Point(lines[i][2], lines[i][3]), 0, 3);
         }
@@ -343,6 +349,7 @@ namespace object_indicator{
         cv::dilate(bg, bg, element_d);
         bg = bg.mul(mat);
         bg.convertTo(gray_mat, CV_32F);
+        */
 
         //clustering(min -> 0(rust), max -> 255(plate))
         cv::Mat_<int> labels_mat((gray_mat.reshape(1,gray_mat.rows*gray_mat.cols)).size(), CV_32SC1);
@@ -415,8 +422,8 @@ namespace object_indicator{
 
         sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", color_mat).toImageMsg();
        /*
-        cv::cvtColor(black, black, CV_GRAY2BGR);
-        sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", black).toImageMsg();
+        cv::cvtColor(blur_mat, blur_mat, CV_GRAY2BGR);
+        sensor_msgs::ImagePtr pub_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", blur_mat).toImageMsg();
 */
         pub_.publish(pub_msg);
 
